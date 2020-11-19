@@ -1,0 +1,6 @@
+{
+  "files": {
+    "package.json": "{ \"main\": \"index.jsx\", \"dependencies\": { \"react\": \"^17.0.0\" } }",
+    "index.jsx": "import * as React from 'react';\n\nexport default () => <h1>Hello world</h1>"
+  }
+}
