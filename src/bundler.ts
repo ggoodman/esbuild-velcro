@@ -159,37 +159,55 @@ export class BundlerServiceImpl implements BundlerService {
 
     const metaHref = memoryStrategy.uriForPath('meta.json').toString();
 
-    return {
-      warnings: buildResult.warnings,
-      outputFiles: (buildResult.outputFiles || []).map((file) => {
+    let normalizedMeta: any = undefined;
+    const outputFiles: Array<{ path: string; content: string }> = [];
+
+    if (buildResult.outputFiles) {
+      for (const file of buildResult.outputFiles) {
         const normalizedPath = file.path
           .replace(`${process.cwd()}/stdin.js`, entrypoint.href)
           .replace(`${process.cwd()}/`, Uri.ensureTrailingSlash(memoryStrategy.rootUri).toString());
 
-        let content = file.text;
-
         if (normalizedPath === metaHref) {
           const meta = JSON.parse(file.text);
-          const normalizedMeta: any = { inputs: {}, outputs: {} };
+          normalizedMeta = { inputs: {}, outputs: {} };
 
           for (const path in meta.inputs) {
+            meta.inputs[path].imports = meta.inputs[path].imports.map((i: {path:string}) => ({path: i.path.replace(/^velcro:/, '')}));
+
             normalizedMeta.inputs[path.replace(/^velcro:/, '')] = meta.inputs[path];
           }
 
           for (const path in meta.outputs) {
-            normalizedMeta.inputs[path.replace(/^velcro:/, '')] = meta.inputs[path];
+            const outputInputs = {} as any;
+            const output = meta.outputs[path];
+
+            for (const inputPath in output.inputs) {
+              const normalizedInputPath = inputPath.replace(/^velcro:/, '');
+
+              outputInputs[normalizedInputPath] = output.inputs[inputPath];
+            }
+
+            normalizedMeta.outputs[path.replace(/^stdin\.js/, entrypoint.href)] = {
+              inputs: outputInputs,
+              exports: output.exports,
+              imports: output.imports,
+              bytes: output.bytes,
+            };
           }
-
-          content = JSON.stringify(normalizedMeta);
-
-          console.dir(meta, { depth: 5 });
+        } else {
+          outputFiles.push({
+            path: normalizedPath,
+            content: file.text,
+          });
         }
+      }
+    }
 
-        return {
-          path: normalizedPath,
-          content,
-        };
-      }),
+    return {
+      warnings: buildResult.warnings,
+      outputFiles,
+      meta: normalizedMeta,
     };
   }
 
