@@ -1,14 +1,22 @@
-import { CanceledError, CancellationToken, CancellationTokenSource, Uri } from '@velcro/common';
+import {
+  CanceledError,
+  CancellationToken,
+  CancellationTokenSource,
+  checkCancellation,
+  Uri,
+} from '@velcro/common';
 import { Resolver } from '@velcro/resolver';
 import { CdnStrategy } from '@velcro/strategy-cdn';
 import { CompoundStrategy } from '@velcro/strategy-compound';
 import { MemoryStrategy } from '@velcro/strategy-memory';
+import { memory } from 'console';
 import { build, Loader, Service, startService } from 'esbuild';
 import got, { CancelError, Got } from 'got/dist/source';
 
 export interface BundleOptions {
+  entrypoints: [string];
   files: Record<string, string>;
-  nodeEnv?: string;
+  env?: Record<string, string>;
   token?: CancellationToken;
 }
 
@@ -60,25 +68,60 @@ export class BundlerServiceImpl implements BundlerService {
       packageMain: ['module', 'main'],
     });
 
-    const indexFileName = 'index.jsx';
-    const indexFileContent = options.files[indexFileName];
-    const indexFileUrl = memoryStrategy.uriForPath(indexFileName);
+    const entrypoints = await checkCancellation(
+      Promise.all(
+        options.entrypoints.map(async (entrypoint) => {
+          const resolveResult = await resolver.resolve(memoryStrategy.uriForPath(entrypoint));
+
+          if (!resolveResult.found) {
+            throw new Error(`Unable to resolve the entrypoint ${JSON.stringify(entrypoint)}`);
+          }
+
+          if (!resolveResult.uri) {
+            throw new Error(
+              `The entrypoint ${JSON.stringify(
+                entrypoint
+              )} was excluded by "browser" field overrides`
+            );
+          }
+
+          const contentResult = await resolver.readFileContent(resolveResult.uri);
+
+          return {
+            href: resolveResult.uri.toString(),
+            content: Buffer.from(contentResult.content).toString('utf-8'),
+          };
+        })
+      ),
+      tokenSource.token
+    );
+
+    const entrypoint = entrypoints[0];
+    const define: Record<string, string> = {};
+
+    if (options.env) {
+      for (const envVar in options.env) {
+        define[`process.env.${envVar}`] = JSON.stringify(options.env[envVar]);
+      }
+    }
+
+    // const indexFileName = 'index.jsx';
+    // const indexFileContent = options.files[indexFileName];
+    // const indexFileUrl = memoryStrategy.uriForPath(indexFileName);
     const namespace = 'velcro';
     const buildResult = await esbuild.build({
       bundle: true,
-      define: {
-        'process.env.NODE_ENV': options.nodeEnv || 'development',
-      },
+      define,
       format: 'esm',
       metafile: 'meta.json',
       minify: true,
       outdir: process.cwd(),
-      // sourcemap: 'external',
-      // splitting: true,
+      sourcemap: 'external',
+      splitting: true,
       stdin: {
-        contents: indexFileContent,
-        sourcefile: indexFileUrl.toString(),
-        loader: loaderForUri(indexFileUrl.toString()),
+        contents: entrypoint.content,
+        sourcefile: entrypoint.href,
+        loader: loaderForUri(entrypoint.href),
       },
       write: false,
       plugins: [
@@ -87,7 +130,7 @@ export class BundlerServiceImpl implements BundlerService {
           setup: (build) => {
             build.onResolve({ filter: /./ }, async ({ importer, path }) => {
               if (importer === '<stdin>') {
-                importer = indexFileUrl.toString();
+                importer = entrypoint.href;
               }
 
               const resolveResult = await resolver.resolve(path, Uri.parse(importer));
@@ -114,12 +157,37 @@ export class BundlerServiceImpl implements BundlerService {
       ],
     });
 
+    const metaHref = memoryStrategy.uriForPath('meta.json').toString();
+
     return {
       warnings: buildResult.warnings,
       outputFiles: (buildResult.outputFiles || []).map((file) => {
+        const normalizedPath = file.path
+          .replace(`${process.cwd()}/stdin.js`, entrypoint.href)
+          .replace(`${process.cwd()}/`, Uri.ensureTrailingSlash(memoryStrategy.rootUri).toString());
+
+        let content = file.text;
+
+        if (normalizedPath === metaHref) {
+          const meta = JSON.parse(file.text);
+          const normalizedMeta: any = { inputs: {}, outputs: {} };
+
+          for (const path in meta.inputs) {
+            normalizedMeta.inputs[path.replace(/^velcro:/, '')] = meta.inputs[path];
+          }
+
+          for (const path in meta.outputs) {
+            normalizedMeta.inputs[path.replace(/^velcro:/, '')] = meta.inputs[path];
+          }
+
+          content = JSON.stringify(normalizedMeta);
+
+          console.dir(meta, { depth: 5 });
+        }
+
         return {
-          path: file.path.replace(`${process.cwd()}/stdin.js`, indexFileUrl.toString()),
-          content: file.text,
+          path: normalizedPath,
+          content,
         };
       }),
     };

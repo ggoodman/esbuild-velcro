@@ -1,6 +1,10 @@
 {
+  "entrypoints": ["index.jsx"],
+  "env": {
+    "NODE_ENV": "production"
+  },
   "files": {
-    "package.json": "{ \"main\": \"index.jsx\", \"dependencies\": { \"react\": \"^17.0.0\" } }",
-    "index.jsx": "import * as React from 'react';\n\nexport default () => <h1>Hello world</h1>"
+    "package.json": "{ \"main\": \"index.jsx\", \"dependencies\": { \"react\": \"^17.0.0\", \"react-dom\": \"^17.0.0\" } }",
+    "index.jsx": "import * as React from 'react';\nimport * as ReactDOM from 'react-dom';\n\nconst Hello = () => <h1>Hello world</h1>;\nReactDOM.render(<Hello />, document.body);\n"
   }
 }
