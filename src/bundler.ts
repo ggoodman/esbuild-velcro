@@ -122,13 +122,23 @@ export class BundlerServiceImpl implements BundlerService {
         contents: entrypoint.content,
         sourcefile: entrypoint.href,
         loader: loaderForUri(entrypoint.href),
+        resolveDir: entrypoint.href,
       },
+      // loader: {
+      //   '.jsx': 'jsx'
+      // },
       write: false,
       plugins: [
         {
           name: 'velcro',
           setup: (build) => {
             build.onResolve({ filter: /./ }, async ({ importer, path }) => {
+              if (path.startsWith('data:')) {
+                return {
+                  external: true,
+                };
+              }
+
               if (importer === '<stdin>') {
                 importer = entrypoint.href;
               }
@@ -150,6 +160,7 @@ export class BundlerServiceImpl implements BundlerService {
 
               return {
                 contents: Buffer.from(readResult.content),
+                loader: 'default',
               };
             });
           },
@@ -165,15 +176,18 @@ export class BundlerServiceImpl implements BundlerService {
     if (buildResult.outputFiles) {
       for (const file of buildResult.outputFiles) {
         const normalizedPath = file.path
-          .replace(`${process.cwd()}/stdin.js`, entrypoint.href)
+          .replace(`${process.cwd()}/stdin`, entrypoint.href.replace(/\.[^.]+$/, ''))
           .replace(`${process.cwd()}/`, Uri.ensureTrailingSlash(memoryStrategy.rootUri).toString());
 
         if (normalizedPath === metaHref) {
           const meta = JSON.parse(file.text);
+
           normalizedMeta = { inputs: {}, outputs: {} };
 
           for (const path in meta.inputs) {
-            meta.inputs[path].imports = meta.inputs[path].imports.map((i: {path:string}) => ({path: i.path.replace(/^velcro:/, '')}));
+            meta.inputs[path].imports = meta.inputs[path].imports.map((i: { path: string }) => ({
+              path: i.path.replace(/^velcro:/, ''),
+            }));
 
             normalizedMeta.inputs[path.replace(/^velcro:/, '')] = meta.inputs[path];
           }
@@ -188,7 +202,9 @@ export class BundlerServiceImpl implements BundlerService {
               outputInputs[normalizedInputPath] = output.inputs[inputPath];
             }
 
-            normalizedMeta.outputs[path.replace(/^stdin\.js/, entrypoint.href)] = {
+            normalizedMeta.outputs[
+              path.replace(/^stdin/, entrypoint.href.replace(/\.[^.]+$/, ''))
+            ] = {
               inputs: outputInputs,
               exports: output.exports,
               imports: output.imports,
