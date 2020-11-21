@@ -6,7 +6,7 @@ import RollupPluginCommonjs from '@rollup/plugin-commonjs';
 import RollupPluginNodeResolve from '@rollup/plugin-node-resolve';
 import RollupPluginJson from '@rollup/plugin-json';
 import RollupPluginTs from '@wessberg/rollup-plugin-ts';
-import { builtinModules } from 'module';
+import Module from 'module';
 import * as Path from 'path';
 import * as Rollup from 'rollup';
 import * as Package from './package.json';
@@ -31,7 +31,7 @@ function parseBareModuleSpec(bareModuleSpec) {
 }
 
 function createIsExternal(packageJson) {
-  const dependencies = new Set([...Object.keys(packageJson.dependencies || {}), ...builtinModules]);
+  const dependencies = new Set([...Object.keys(packageJson.dependencies || {}), ...Module.builtinModules]);
 
   return function isExternal(id) {
     const spec = parseBareModuleSpec(id);
